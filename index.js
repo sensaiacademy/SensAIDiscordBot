@@ -11,8 +11,6 @@ const axios = require('axios');
 // const N8N_WEBHOOK_URL = 'https://n8n.feniksfilm.pl/webhook/0893867c-6f54-4ae9-b38b-8f33ed7a4a83';
 
 // Utworzenie klienta Discord z odpowiednimi "intents"
-// const { Client, GatewayIntentBits, ChannelType } = require('discord.js');
-// const axios = require('axios');
 
 const client = new Client({
   intents: [
