@@ -67,11 +67,11 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // Sprawdzenie, czy to DM
-  const isDM = message.channel.type === ChannelType.DM;
-
+  // Sprawdzenie, czy to DM - zaktualizowana metoda zgodnie z dokumentacją discord.js v14+
+  const isDM = message.channel.isDMBased();
+  
   // Dodatkowe logowanie do debugowania typu kanału - to było kluczowe, zostawmy na razie
-  console.log(`Debug DM: message.channel.type=${message.channel.type}, ChannelType.DM=${ChannelType.DM}, Porównanie (message.channel.type === ChannelType.DM) = ${message.channel.type === ChannelType.DM}`);
+  console.log(`Debug DM: message.channel.type=${message.channel.type}, ChannelType.DM=${ChannelType.DM}, Porównanie (isDMBased) = ${message.channel.isDMBased()}`);
   console.log(`isDM: ${isDM}`); // Zaktualizowany log dla isDM
 
   if (isDM) {
