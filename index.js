@@ -4,6 +4,12 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, ChannelType, Partials } = require('discord.js');
 const axios = require('axios');
 const http = require('http'); // Dodano moduł http
+const OpenAI = require('openai'); // Import biblioteki OpenAI
+
+// Konfiguracja klienta OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_KEY,
+});
 
 const client = new Client({
   intents: [
@@ -12,54 +18,104 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ],
-  partials: [Partials.Channel, Partials.Message, Partials.User] // Poprawna konfiguracja dla DM
+  partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
 const allowedChannelId = '1372927875224703027'; // <- Twój kanał
 
+// Proste przechowywanie wątków w pamięci (UserId -> ThreadId)
+const userThreads = {};
+
+async function getOrCreateThreadId(userId) {
+  if (userThreads[userId]) {
+    console.log(`Znaleziono istniejący wątek dla użytkownika ${userId}: ${userThreads[userId]}`);
+    return userThreads[userId];
+  }
+  try {
+    console.log(`Tworzenie nowego wątku dla użytkownika ${userId}...`);
+    const thread = await openai.beta.threads.create();
+    userThreads[userId] = thread.id;
+    console.log(`Stworzono nowy wątek ${thread.id} dla użytkownika ${userId}`);
+    return thread.id;
+  } catch (error) {
+    console.error("Błąd podczas tworzenia wątku OpenAI:", error);
+    return null;
+  }
+}
+
 async function handlePrivateMessage(message) {
   console.log(`Rozpoczynam obsługę wiadomości prywatnej od ${message.author.tag} (ID: ${message.author.id}), treść: "${message.content}", ID wiadomości: ${message.id}`);
-  const privateWebhookUrl = process.env.PRIVATE_WEBHOOK;
-
-  if (!privateWebhookUrl) {
-    console.error("Zmienna środowiskowa PRIVATE_WEBHOOK nie jest ustawiona. Bot nie może przetworzyć DM.");
-    message.reply("Przepraszam, wystąpił problem z moją konfiguracją i nie mogę teraz przetworzyć Twojej wiadomości prywatnej.").catch(console.error);
+  
+  const assistantId = process.env.OPENAI_ASSISTANT_ID;
+  if (!assistantId) {
+    console.error("Zmienna środowiskowa OPENAI_ASSISTANT_ID nie jest ustawiona!");
+    message.reply("Przepraszam, wystąpił problem z moją konfiguracją (brak ID Asystenta) i nie mogę teraz przetworzyć Twojej wiadomości.").catch(console.error);
     return;
   }
 
-  const payload = {
-    userId: message.author.id,
-    username: message.author.username,
-    messageId: message.id,
-    content: message.content,
-    timestamp: message.createdTimestamp // Dodatkowo, czas otrzymania wiadomości
-  };
+  if (!process.env.OPENAI_KEY) {
+    console.error("Zmienna środowiskowa OPENAI_KEY nie jest ustawiona!");
+     message.reply("Przepraszam, wystąpił problem z moją konfiguracją (brak klucza API OpenAI) i nie mogę teraz przetworzyć Twojej wiadomości.").catch(console.error);
+    return;
+  }
 
-  console.log("Wysyłanie danych DM do PRIVATE_WEBHOOK:", payload);
+  const threadId = await getOrCreateThreadId(message.author.id);
+  if (!threadId) {
+    message.reply("Przepraszam, nie udało mi się utworzyć lub pobrać wątku konwersacji. Spróbuj ponownie później.").catch(console.error);
+    return;
+  }
 
   try {
-    const response = await axios.post(privateWebhookUrl, payload);
-    console.log(`Odpowiedź z PRIVATE_WEBHOOK: Status ${response.status}, Dane:`, response.data);
+    // Krok 3: Dodaj wiadomość do wątku
+    console.log(`Dodawanie wiadomości do wątku ${threadId}: "${message.content}"`);
+    await openai.beta.threads.messages.create(
+      threadId,
+      {
+        role: "user",
+        content: message.content
+      }
+    );
 
-    // Zaktualizowana logika obsługi odpowiedzi - sprawdzenie zarówno 'reply' jak i 'output'
-    if (response.data && typeof response.data.reply === 'string') {
-      // Kompatybilność wsteczna dla pola reply
-      message.reply(response.data.reply).catch(console.error);
-      console.log("Wysłano odpowiedź z PRIVATE_WEBHOOK do użytkownika (pole reply):", response.data.reply);
-    } else if (response.data && typeof response.data.output === 'string') {
-      // Nowy format odpowiedzi zawierający pole output
-      message.reply(response.data.output).catch(console.error);
-      console.log("Wysłano odpowiedź z PRIVATE_WEBHOOK do użytkownika (pole output):", response.data.output);
-    } else if (response.data) {
-      console.log("PRIVATE_WEBHOOK odpowiedział, ale odpowiedź nie zawiera ani pola 'reply', ani 'output' typu string. Dane odpowiedzi:", response.data);
-      // Opcjonalnie - możesz dodać domyślną odpowiedź
-      // message.reply("Otrzymałem Twoją wiadomość, ale system nie dostarczył jednoznacznej odpowiedzi.").catch(console.error);
+    // Krok 4: Uruchom Asystenta na wątku (użyjemy createAndPoll dla uproszczenia)
+    console.log(`Uruchamianie Asystenta ${assistantId} na wątku ${threadId}...`);
+    // Pokaż użytkownikowi, że bot "pisze"
+    await message.channel.sendTyping();
+
+    const run = await openai.beta.threads.runs.createAndPoll(
+      threadId,
+      {
+        assistant_id: assistantId,
+        // Możesz dodać instrukcje specyficzne dla tego uruchomienia, jeśli potrzebujesz
+        // instructions: "Odpowiedz zwięźle."
+      }
+    );
+
+    console.log(`Status uruchomienia Asystenta: ${run.status}`);
+
+    if (run.status === 'completed') {
+      const messagesFromThread = await openai.beta.threads.messages.list(
+        run.thread_id
+      );
+      // Odpowiedzi Asystenta są dodawane do wątku. Interesuje nas najnowsza odpowiedź roli 'assistant'.
+      const lastAssistantMessage = messagesFromThread.data
+        .filter(msg => msg.run_id === run.id && msg.role === 'assistant')
+        .pop(); // Weź ostatnią wiadomość asystenta z tego uruchomienia
+
+      if (lastAssistantMessage && lastAssistantMessage.content[0].type === 'text') {
+        const assistantReply = lastAssistantMessage.content[0].text.value;
+        console.log("Otrzymano odpowiedź od Asystenta:", assistantReply);
+        message.reply(assistantReply).catch(console.error);
+      } else {
+        console.log("Asystent zakończył pracę, ale nie znaleziono odpowiedniej wiadomości tekstowej w odpowiedzi.", messagesFromThread.data);
+        message.reply("Przepraszam, Asystent przetworzył Twoją wiadomość, ale nie otrzymałem od niego odpowiedzi w oczekiwanym formacie.").catch(console.error);
+      }
     } else {
-      console.log("PRIVATE_WEBHOOK odpowiedział, ale bez danych (response.data jest puste).");
+      console.log(`Uruchomienie Asystenta nie zakończyło się sukcesem. Status: ${run.status}`);
+      message.reply(`Przepraszam, wystąpił problem podczas przetwarzania Twojej wiadomości przez Asystenta. Status: ${run.status}`).catch(console.error);
     }
   } catch (error) {
-    console.error("Błąd podczas komunikacji z PRIVATE_WEBHOOK:", error.response ? error.response.data : error.message);
-    message.reply("Przepraszam, napotkałem błąd podczas próby przetworzenia Twojej wiadomości.").catch(console.error);
+    console.error("Błąd podczas interakcji z OpenAI Assistants API:", error);
+    message.reply("Przepraszam, napotkałem błąd podczas próby komunikacji z Asystentem OpenAI.").catch(console.error);
   }
 }
 
