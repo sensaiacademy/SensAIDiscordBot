@@ -25,6 +25,9 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
+  // Dodatkowe logowanie do debugowania typu kanału
+  console.log(`Debug DM: message.channel.type=${message.channel.type}, ChannelType.DM=${ChannelType.DM}, Porównanie (message.channel.type === ChannelType.DM) = ${message.channel.type === ChannelType.DM}`);
+
   const isDM = message.channel.type === ChannelType.DM;
   const isAllowedChannel = message.channel.id === allowedChannelId;
   console.log(`isDM: ${isDM}, isAllowedChannel: ${isAllowedChannel}`);
