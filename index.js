@@ -110,7 +110,24 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN);
+// Logowanie i obsługa zdarzeń klienta Discord
+console.log("Próba zalogowania bota do Discorda...");
+client.login(process.env.DISCORD_BOT_TOKEN)
+  .then(() => {
+    console.log("Logowanie do Discorda zakończone pomyślnie (then).");
+  })
+  .catch(error => {
+    console.error("Błąd podczas client.login() (catch):", error);
+  });
+
+client.on('ready', (c) => {
+  console.log(`Bot ${c.user.tag} jest gotowy i zalogowany!`);
+  console.log(`Bot jest na ${c.guilds.cache.size} serwerach.`);
+});
+
+client.on('error', (error) => {
+  console.error('Wystąpił błąd klienta Discord.js:', error);
+});
 
 // Prosty serwer HTTP dla health checks na Railway
 const port = process.env.PORT || 3000; // Użyj portu z Railway lub domyślnego 3000
