@@ -1,7 +1,7 @@
 require('dotenv').config();
 // === index.js ===
 
-const { Client, GatewayIntentBits, ChannelType } = require('discord.js');
+const { Client, GatewayIntentBits, ChannelType, Partials } = require('discord.js');
 const axios = require('axios');
 const http = require('http'); // Dodano moduł http
 
@@ -12,7 +12,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ],
-  partials: ['CHANNEL'] // potrzebne, by bot widział DM
+  partials: [Partials.Channel, Partials.Message, Partials.User] // Poprawna konfiguracja dla DM
 });
 
 const allowedChannelId = '1372927875224703027'; // <- Twój kanał
