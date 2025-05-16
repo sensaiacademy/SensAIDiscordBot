@@ -14,7 +14,7 @@ const client = new Client({
   partials: ['CHANNEL'] // potrzebne, by bot widział DM
 });
 
-const allowedChannelId = '123456789012345678'; // <- Twój kanał
+const allowedChannelId = '1372927875224703027'; // <- Twój kanał
 const webhook = process.env.N8N_WEBHOOK_URL;
 
 client.on('messageCreate', async (message) => {
