@@ -41,16 +41,21 @@ async function handlePrivateMessage(message) {
     const response = await axios.post(privateWebhookUrl, payload);
     console.log(`Odpowiedź z PRIVATE_WEBHOOK: Status ${response.status}, Dane:`, response.data);
 
-    // Załóżmy, że webhook odpowiada JSONem z polem 'reply', które zawiera tekst odpowiedzi
+    // Zaktualizowana logika obsługi odpowiedzi - sprawdzenie zarówno 'reply' jak i 'output'
     if (response.data && typeof response.data.reply === 'string') {
+      // Kompatybilność wsteczna dla pola reply
       message.reply(response.data.reply).catch(console.error);
-      console.log("Wysłano odpowiedź z PRIVATE_WEBHOOK do użytkownika:", response.data.reply);
-    } else if (response.data) { // Jeśli jest odpowiedź, ale nie w oczekiwanym formacie
-        console.log("PRIVATE_WEBHOOK odpowiedział, ale odpowiedź nie zawiera pola 'reply' typu string. Dane odpowiedzi:", response.data);
-        // Możesz tu dodać domyślną odpowiedź lub nic nie robić
-        // message.reply("Otrzymałem Twoją wiadomość, ale system nie dostarczył konkretnej odpowiedzi.").catch(console.error);
+      console.log("Wysłano odpowiedź z PRIVATE_WEBHOOK do użytkownika (pole reply):", response.data.reply);
+    } else if (response.data && typeof response.data.output === 'string') {
+      // Nowy format odpowiedzi zawierający pole output
+      message.reply(response.data.output).catch(console.error);
+      console.log("Wysłano odpowiedź z PRIVATE_WEBHOOK do użytkownika (pole output):", response.data.output);
+    } else if (response.data) {
+      console.log("PRIVATE_WEBHOOK odpowiedział, ale odpowiedź nie zawiera ani pola 'reply', ani 'output' typu string. Dane odpowiedzi:", response.data);
+      // Opcjonalnie - możesz dodać domyślną odpowiedź
+      // message.reply("Otrzymałem Twoją wiadomość, ale system nie dostarczył jednoznacznej odpowiedzi.").catch(console.error);
     } else {
-        console.log("PRIVATE_WEBHOOK odpowiedział, ale bez danych (response.data jest puste).");
+      console.log("PRIVATE_WEBHOOK odpowiedział, ale bez danych (response.data jest puste).");
     }
   } catch (error) {
     console.error("Błąd podczas komunikacji z PRIVATE_WEBHOOK:", error.response ? error.response.data : error.message);
