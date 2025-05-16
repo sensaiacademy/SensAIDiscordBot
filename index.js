@@ -46,11 +46,12 @@ async function getOrCreateThreadId(userId) {
 async function handlePrivateMessage(message) {
   console.log(`Rozpoczynam obsługę wiadomości prywatnej od ${message.author.tag} (ID: ${message.author.id}), treść: "${message.content}", ID wiadomości: ${message.id}`);
   
-  const assistantId = process.env.OPENAI_ASSISTANT_ID;
+  let assistantId = process.env.OPENAI_ASSISTANT_ID;
+
   if (!assistantId) {
-    console.error("Zmienna środowiskowa OPENAI_ASSISTANT_ID nie jest ustawiona!");
-    message.reply("Przepraszam, wystąpił problem z moją konfiguracją (brak ID Asystenta) i nie mogę teraz przetworzyć Twojej wiadomości.").catch(console.error);
-    return;
+    console.warn("OSTRZEŻENIE: Zmienna środowiskowa OPENAI_ASSISTANT_ID nie jest ustawiona! Używam domyślnego ID: asst_44ZepLF27M4Uwc16ys5NahAN");
+    assistantId = 'asst_44ZepLF27M4Uwc16ys5NahAN'; 
+    // W środowisku produkcyjnym, brak tej zmiennej powinien być traktowany bardziej rygorystycznie.
   }
 
   if (!process.env.OPENAI_KEY) {
