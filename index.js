@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const { Client, GatewayIntentBits, ChannelType } = require('discord.js');
 const axios = require('axios');
+const http = require('http'); // Dodano moduł http
 
 const client = new Client({
   intents: [
@@ -111,6 +112,14 @@ client.on('messageCreate', async (message) => {
 
 client.login(process.env.DISCORD_BOT_TOKEN);
 
+// Prosty serwer HTTP dla health checks na Railway
+const port = process.env.PORT || 3000; // Użyj portu z Railway lub domyślnego 3000
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Discord bot is active.\n');
+}).listen(port, () => {
+  console.log(`Minimal HTTP server for health checks listening on port ${port}`);
+});
 
 // === package.json ===
 // Użyj poniższego, jeśli tworzysz nowy projekt:
