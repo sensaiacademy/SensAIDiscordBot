@@ -124,12 +124,6 @@ client.on('messageCreate', async (message) => {
     await processMessageWithOpenAI(message);
   } else if (message.channel.id === mainChannelId) {
     console.log(`Wiadomość na głównym kanale (${mainChannelId}). Przetwarzanie przez N8N Webhook...`);
-    try {
-      await message.react('👋');
-      console.log("Dodano reakcję 👋 do wiadomości na głównym kanale.");
-    } catch (reactError) {
-      console.error("Nie udało się dodać reakcji na głównym kanale:", reactError);
-    }
     
     const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
     if (!n8nWebhookUrl) {
