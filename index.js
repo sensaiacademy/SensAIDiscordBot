@@ -87,10 +87,16 @@ async function processMessageWithOpenAI(message, addReaction = false) {
   }
 
   try {
-    console.log(`Dodawanie wiadomości do wątku ${threadId}: "${message.content}"`);
+    // Formatowanie wiadomości z Twoim promptem
+    const userMessageWithPrompt = `Poniżej znajdziesz wiadomość od użytkownika na którą masz odpowiedzieć. Jeśli odnosisz się do plików, spróbuj dodać do nich link w swojej odpowiedzi. W swojej odpowiedzi nie nawiązuj do tego, że dałem Ci takie polecenie.\n\n### Wiadomość:\n${message.content}`;
+
+    console.log(`Dodawanie sformatowanej wiadomości do wątku ${threadId}: "${userMessageWithPrompt}"`);
     await openai.beta.threads.messages.create(
       threadId,
-      { role: "user", content: message.content }
+      { 
+        role: "user", 
+        content: userMessageWithPrompt // Używamy sformatowanej wiadomości
+      }
     );
 
     console.log(`Uruchamianie Asystenta ${assistantId} na wątku ${threadId}...`);
