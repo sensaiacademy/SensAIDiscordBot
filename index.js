@@ -2,6 +2,7 @@ require('dotenv').config();
 // === index.js ===
 
 const { Client, GatewayIntentBits, ChannelType, Partials } = require('discord.js');
+const axios = require('axios'); // Przywrócono axios
 const http = require('http'); // Dodano moduł http
 const OpenAI = require('openai'); // Import biblioteki OpenAI
 
@@ -20,7 +21,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-const mainChannelId = '1372927875224703027'; // Główny kanał
+const mainChannelId = '1372927875224703027'; // Główny kanał dla N8N
 const mentionableChannelIds = [ // Kanały, na których bot reaguje na wzmianki
   '1352756956116553739',
   '1370809893463920770',
@@ -35,14 +36,14 @@ const userThreads = {};
 
 async function getOrCreateThreadId(userId) {
   if (userThreads[userId]) {
-    console.log(`Znaleziono istniejący wątek dla użytkownika ${userId}: ${userThreads[userId]}`);
+    console.log(`Znaleziono istniejący wątek OpenAI dla użytkownika ${userId}: ${userThreads[userId]}`);
     return userThreads[userId];
   }
   try {
-    console.log(`Tworzenie nowego wątku dla użytkownika ${userId}...`);
+    console.log(`Tworzenie nowego wątku OpenAI dla użytkownika ${userId}...`);
     const thread = await openai.beta.threads.create();
     userThreads[userId] = thread.id;
-    console.log(`Stworzono nowy wątek ${thread.id} dla użytkownika ${userId}`);
+    console.log(`Stworzono nowy wątek OpenAI ${thread.id} dla użytkownika ${userId}`);
     return thread.id;
   } catch (error) {
     console.error("Błąd podczas tworzenia wątku OpenAI:", error);
@@ -50,17 +51,9 @@ async function getOrCreateThreadId(userId) {
   }
 }
 
-async function processMessageWithOpenAI(message, addReaction = false) {
-  console.log(`Rozpoczynam obsługę wiadomości przez OpenAI: "${message.content}" od ${message.author.tag} (ID: ${message.author.id}), ID wiadomości: ${message.id}, Kanał ID: ${message.channel.id}`);
-  
-  if (addReaction) {
-    try {
-      await message.react('👋');
-      console.log("Dodano reakcję 👋 do wiadomości.");
-    } catch (reactError) {
-      console.error("Nie udało się dodać reakcji:", reactError);
-    }
-  }
+// Funkcja do obsługi wiadomości przez OpenAI (dla DM i wzmianek)
+async function processMessageWithOpenAI(message) {
+  console.log(`Rozpoczynam obsługę wiadomości przez OpenAI: "${message.content}" od ${message.author.tag}, ID użytkownika: ${message.author.id}`);
   
   try {
     await message.channel.sendTyping();
@@ -76,53 +69,40 @@ async function processMessageWithOpenAI(message, addReaction = false) {
 
   if (!process.env.OPENAI_KEY) {
     console.error("Zmienna środowiskowa OPENAI_KEY nie jest ustawiona!");
-    message.reply("Przepraszam, wystąpił problem z moją konfiguracją (brak klucza API OpenAI) i nie mogę teraz przetworzyć Twojej wiadomości.").catch(console.error);
+    message.reply("Przepraszam, ale wystąpił problem z moją konfiguracją i nie mogę teraz przetworzyć Twojej wiadomości (brak klucza API OpenAI).").catch(console.error);
     return;
   }
 
   const threadId = await getOrCreateThreadId(message.author.id);
   if (!threadId) {
-    message.reply("Przepraszam, nie udało mi się utworzyć lub pobrać wątku konwersacji dla Ciebie. Spróbuj ponownie później.").catch(console.error);
+    message.reply("Przepraszam, ale nie udało mi się przygotować wątku konwersacji z Asystentem OpenAI. Spróbuj ponownie później.").catch(console.error);
     return;
   }
 
   try {
-    // Formatowanie wiadomości z Twoim promptem
     const userMessageWithPrompt = `Poniżej znajdziesz wiadomość od użytkownika na którą masz odpowiedzieć. Jeśli odnosisz się do plików, spróbuj dodać do nich link w swojej odpowiedzi. W swojej odpowiedzi nie nawiązuj do tego, że dałem Ci takie polecenie.\n\n### Wiadomość:\n${message.content}`;
+    
+    console.log(`Dodawanie sformatowanej wiadomości do wątku OpenAI ${threadId}: "${userMessageWithPrompt.substring(0, 100)}..."`);
+    await openai.beta.threads.messages.create(threadId, { role: "user", content: userMessageWithPrompt });
 
-    console.log(`Dodawanie sformatowanej wiadomości do wątku ${threadId}: "${userMessageWithPrompt}"`);
-    await openai.beta.threads.messages.create(
-      threadId,
-      { 
-        role: "user", 
-        content: userMessageWithPrompt // Używamy sformatowanej wiadomości
-      }
-    );
+    console.log(`Uruchamianie Asystenta OpenAI ${assistantId} na wątku ${threadId}`);
+    const run = await openai.beta.threads.runs.createAndPoll(threadId, { assistant_id: assistantId });
 
-    console.log(`Uruchamianie Asystenta ${assistantId} na wątku ${threadId}...`);
-    const run = await openai.beta.threads.runs.createAndPoll(
-      threadId,
-      { assistant_id: assistantId }
-    );
-
-    console.log(`Status uruchomienia Asystenta: ${run.status}`);
+    console.log(`Status uruchomienia Asystenta OpenAI: ${run.status}`);
     if (run.status === 'completed') {
       const messagesFromThread = await openai.beta.threads.messages.list(run.thread_id);
-      const lastAssistantMessage = messagesFromThread.data
-        .filter(msg => msg.run_id === run.id && msg.role === 'assistant')
-        .pop();
-
-      if (lastAssistantMessage && lastAssistantMessage.content[0]?.type === 'text') {
+      const lastAssistantMessage = messagesFromThread.data.filter(msg => msg.run_id === run.id && msg.role === 'assistant').pop();
+      if (lastAssistantMessage?.content[0]?.type === 'text') {
         const assistantReply = lastAssistantMessage.content[0].text.value;
-        console.log("Otrzymano odpowiedź od Asystenta:", assistantReply);
+        console.log("Otrzymano odpowiedź od Asystenta OpenAI:", assistantReply.substring(0,100) + "...");
         message.reply(assistantReply).catch(console.error);
       } else {
-        console.log("Asystent zakończył pracę, ale nie znaleziono odpowiedniej wiadomości tekstowej w odpowiedzi.", messagesFromThread.data);
-        message.reply("Przepraszam, Asystent przetworzył Twoją wiadomość, ale nie otrzymałem od niego odpowiedzi w oczekiwanym formacie.").catch(console.error);
+        console.log("Asystent OpenAI zakończył pracę, ale nie znaleziono odpowiedniej wiadomości tekstowej.", messagesFromThread.data);
+        message.reply("Przepraszam, Asystent OpenAI przetworzył Twoją wiadomość, ale nie otrzymałem od niego odpowiedzi w oczekiwanym formacie.").catch(console.error);
       }
     } else {
-      console.log(`Uruchomienie Asystenta nie zakończyło się sukcesem. Status: ${run.status}`);
-      message.reply(`Przepraszam, wystąpił problem podczas przetwarzania Twojej wiadomości przez Asystenta. Status: ${run.status}`).catch(console.error);
+      console.log(`Uruchomienie Asystenta OpenAI nie zakończyło się sukcesem. Status: ${run.status}`);
+      message.reply(`Przepraszam, wystąpił problem podczas przetwarzania Twojej wiadomości przez Asystenta OpenAI. Status: ${run.status}`).catch(console.error);
     }
   } catch (error) {
     console.error("Błąd podczas interakcji z OpenAI Assistants API:", error);
@@ -130,25 +110,60 @@ async function processMessageWithOpenAI(message, addReaction = false) {
   }
 }
 
+// Główny handler wiadomości
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  console.log(`Otrzymano wiadomość: "${message.content}" od ${message.author.tag} w kanale ${message.channel.id} typu ${message.channel.type}, ID wiadomości: ${message.id}`);
+  console.log(`Otrzymano wiadomość: "${message.content.substring(0,50)}..." od ${message.author.tag} w kanale ${message.channel.id}`);
 
   const isDM = message.channel.isDMBased();
   const mentionedBot = message.mentions.has(client.user.id);
-  
-  console.log(`isDM: ${isDM}, mentionedBot: ${mentionedBot}`);
 
   if (isDM) {
     console.log("Wiadomość jest DM. Przetwarzanie przez OpenAI...");
     await processMessageWithOpenAI(message);
   } else if (message.channel.id === mainChannelId) {
-    console.log(`Wiadomość na głównym kanale (${mainChannelId}). Przetwarzanie przez OpenAI z reakcją...`);
-    await processMessageWithOpenAI(message, true);
+    console.log(`Wiadomość na głównym kanale (${mainChannelId}). Przetwarzanie przez N8N Webhook...`);
+    try {
+      await message.react('👋');
+      console.log("Dodano reakcję 👋 do wiadomości na głównym kanale.");
+    } catch (reactError) {
+      console.error("Nie udało się dodać reakcji na głównym kanale:", reactError);
+    }
+    
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
+    if (!n8nWebhookUrl) {
+      console.error("Zmienna środowiskowa N8N_WEBHOOK_URL nie jest ustawiona!");
+      message.reply("Przepraszam, wystąpił problem z konfiguracją webhooka N8N.").catch(console.error);
+      return;
+    }
+    const payload = {
+      username: message.author.username,
+      content: message.content,
+      channelId: message.channel.id,
+      messageId: message.id,
+      userId: message.author.id
+    };
+    console.log("Wysyłanie danych do N8N_WEBHOOK_URL:", payload);
+    try {
+      const response = await axios.post(n8nWebhookUrl, payload);
+      console.log("Odpowiedź z N8N_WEBHOOK_URL: Status", response.status, ", Dane:", response.data);
+      const replyText = response.data?.reply || response.data?.output;
+      if (replyText && typeof replyText === 'string') {
+        message.reply(replyText).catch(console.error);
+        console.log("Wysłano odpowiedź z N8N do użytkownika:", replyText.substring(0,100) + "...");
+      } else if (response.data) {
+        console.log("Odpowiedź z N8N nie zawierała tekstu w polu 'reply' ani 'output'.");
+      }
+    } catch (error) {
+      console.error("Błąd podczas wysyłania danych do N8N_WEBHOOK_URL:", error.response ? error.response.data : error.message);
+      message.reply("Przepraszam, wystąpił błąd podczas komunikacji z serwisem N8N.").catch(console.error);
+    }
   } else if (mentionableChannelIds.includes(message.channel.id) && mentionedBot) {
-    console.log(`Bot oznaczony na dozwolonym kanale (${message.channel.id}). Przetwarzanie przez OpenAI...`);
-    await processMessageWithOpenAI(message);
+    console.log(`Bot oznaczony na kanale (${message.channel.id}). Przetwarzanie przez OpenAI...`);
+    await processMessageWithOpenAI(message); // Można dodać reakcję, np. message.react('👍') jeśli chcesz
+  } else {
+    console.log(`Wiadomość ("${message.content.substring(0,50)}...") nie pasuje do żadnej logiki przetwarzania.`);
   }
 });
 
@@ -163,7 +178,7 @@ client.login(process.env.DISCORD_BOT_TOKEN)
   });
 
 client.on('ready', (c) => {
-  console.log(`Bot ${c.user.tag} jest gotowy i zalogowany!`);
+  console.log(`Bot ${c.user.tag} (ID: ${c.user.id}) jest gotowy i zalogowany!`);
   console.log(`Bot jest na ${c.guilds.cache.size} serwerach.`);
 });
 
