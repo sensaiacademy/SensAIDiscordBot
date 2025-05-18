@@ -2,7 +2,6 @@ require('dotenv').config();
 // === index.js ===
 
 const { Client, GatewayIntentBits, ChannelType, Partials } = require('discord.js');
-const axios = require('axios');
 const http = require('http'); // Dodano moduł http
 const OpenAI = require('openai'); // Import biblioteki OpenAI
 
@@ -21,7 +20,15 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-const allowedChannelId = '1372927875224703027'; // <- Twój kanał
+const mainChannelId = '1372927875224703027'; // Główny kanał
+const mentionableChannelIds = [ // Kanały, na których bot reaguje na wzmianki
+  '1352756956116553739',
+  '1370809893463920770',
+  '1370809961717960945',
+  '1373623852097077300',
+  '1373623969516884018',
+  '1296112651419648130'
+];
 
 // Proste przechowywanie wątków w pamięci (UserId -> ThreadId)
 const userThreads = {};
@@ -43,66 +50,63 @@ async function getOrCreateThreadId(userId) {
   }
 }
 
-async function handlePrivateMessage(message) {
-  console.log(`Rozpoczynam obsługę wiadomości prywatnej od ${message.author.tag} (ID: ${message.author.id}), treść: "${message.content}", ID wiadomości: ${message.id}`);
+async function processMessageWithOpenAI(message, addReaction = false) {
+  console.log(`Rozpoczynam obsługę wiadomości przez OpenAI: "${message.content}" od ${message.author.tag} (ID: ${message.author.id}), ID wiadomości: ${message.id}, Kanał ID: ${message.channel.id}`);
   
-  let assistantId = process.env.OPENAI_ASSISTANT_ID;
+  if (addReaction) {
+    try {
+      await message.react('👋');
+      console.log("Dodano reakcję 👋 do wiadomości.");
+    } catch (reactError) {
+      console.error("Nie udało się dodać reakcji:", reactError);
+    }
+  }
+  
+  try {
+    await message.channel.sendTyping();
+  } catch (typingError) {
+      console.warn("Nie udało się wysłać 'sendTyping':", typingError.message);
+  }
 
+  let assistantId = process.env.OPENAI_ASSISTANT_ID;
   if (!assistantId) {
     console.warn("OSTRZEŻENIE: Zmienna środowiskowa OPENAI_ASSISTANT_ID nie jest ustawiona! Używam domyślnego ID: asst_44ZepLF27M4Uwc16ys5NahAN");
-    assistantId = 'asst_44ZepLF27M4Uwc16ys5NahAN'; 
-    // W środowisku produkcyjnym, brak tej zmiennej powinien być traktowany bardziej rygorystycznie.
+    assistantId = 'asst_44ZepLF27M4Uwc16ys5NahAN';
   }
 
   if (!process.env.OPENAI_KEY) {
     console.error("Zmienna środowiskowa OPENAI_KEY nie jest ustawiona!");
-     message.reply("Przepraszam, wystąpił problem z moją konfiguracją (brak klucza API OpenAI) i nie mogę teraz przetworzyć Twojej wiadomości.").catch(console.error);
+    message.reply("Przepraszam, wystąpił problem z moją konfiguracją (brak klucza API OpenAI) i nie mogę teraz przetworzyć Twojej wiadomości.").catch(console.error);
     return;
   }
 
   const threadId = await getOrCreateThreadId(message.author.id);
   if (!threadId) {
-    message.reply("Przepraszam, nie udało mi się utworzyć lub pobrać wątku konwersacji. Spróbuj ponownie później.").catch(console.error);
+    message.reply("Przepraszam, nie udało mi się utworzyć lub pobrać wątku konwersacji dla Ciebie. Spróbuj ponownie później.").catch(console.error);
     return;
   }
 
   try {
-    // Krok 3: Dodaj wiadomość do wątku
     console.log(`Dodawanie wiadomości do wątku ${threadId}: "${message.content}"`);
     await openai.beta.threads.messages.create(
       threadId,
-      {
-        role: "user",
-        content: message.content
-      }
+      { role: "user", content: message.content }
     );
 
-    // Krok 4: Uruchom Asystenta na wątku (użyjemy createAndPoll dla uproszczenia)
     console.log(`Uruchamianie Asystenta ${assistantId} na wątku ${threadId}...`);
-    // Pokaż użytkownikowi, że bot "pisze"
-    await message.channel.sendTyping();
-
     const run = await openai.beta.threads.runs.createAndPoll(
       threadId,
-      {
-        assistant_id: assistantId,
-        // Możesz dodać instrukcje specyficzne dla tego uruchomienia, jeśli potrzebujesz
-        // instructions: "Odpowiedz zwięźle."
-      }
+      { assistant_id: assistantId }
     );
 
     console.log(`Status uruchomienia Asystenta: ${run.status}`);
-
     if (run.status === 'completed') {
-      const messagesFromThread = await openai.beta.threads.messages.list(
-        run.thread_id
-      );
-      // Odpowiedzi Asystenta są dodawane do wątku. Interesuje nas najnowsza odpowiedź roli 'assistant'.
+      const messagesFromThread = await openai.beta.threads.messages.list(run.thread_id);
       const lastAssistantMessage = messagesFromThread.data
         .filter(msg => msg.run_id === run.id && msg.role === 'assistant')
-        .pop(); // Weź ostatnią wiadomość asystenta z tego uruchomienia
+        .pop();
 
-      if (lastAssistantMessage && lastAssistantMessage.content[0].type === 'text') {
+      if (lastAssistantMessage && lastAssistantMessage.content[0]?.type === 'text') {
         const assistantReply = lastAssistantMessage.content[0].text.value;
         console.log("Otrzymano odpowiedź od Asystenta:", assistantReply);
         message.reply(assistantReply).catch(console.error);
@@ -121,54 +125,24 @@ async function handlePrivateMessage(message) {
 }
 
 client.on('messageCreate', async (message) => {
-  // Usuniemy część logów, które mogą być teraz nadmiarowe, zostawimy bardziej ogólne
-  console.log(`Otrzymano wiadomość: "${message.content}" od ${message.author.tag} w kanale typu ${message.channel.type}, ID wiadomości: ${message.id}`);
+  if (message.author.bot) return;
 
-  if (message.author.bot) {
-    // console.log("Wiadomość od bota, ignorowanie."); // Można zostawić lub usunąć dla czystości logów
-    return;
-  }
+  console.log(`Otrzymano wiadomość: "${message.content}" od ${message.author.tag} w kanale ${message.channel.id} typu ${message.channel.type}, ID wiadomości: ${message.id}`);
 
-  // Sprawdzenie, czy to DM - zaktualizowana metoda zgodnie z dokumentacją discord.js v14+
   const isDM = message.channel.isDMBased();
+  const mentionedBot = message.mentions.has(client.user.id);
   
-  // Dodatkowe logowanie do debugowania typu kanału - to było kluczowe, zostawmy na razie
-  console.log(`Debug DM: message.channel.type=${message.channel.type}, ChannelType.DM=${ChannelType.DM}, Porównanie (isDMBased) = ${message.channel.isDMBased()}`);
-  console.log(`isDM: ${isDM}`); // Zaktualizowany log dla isDM
+  console.log(`isDM: ${isDM}, mentionedBot: ${mentionedBot}`);
 
   if (isDM) {
-    await handlePrivateMessage(message);
-  } else {
-    // Logika dla wiadomości na kanałach serwera
-    const isAllowedChannel = message.channel.id === allowedChannelId;
-    console.log(`Wiadomość nie jest DM. isAllowedChannel: ${isAllowedChannel}`);
-
-    if (isAllowedChannel) {
-      const serverWebhookUrl = process.env.N8N_WEBHOOK_URL; // Przemianowałem dla jasności
-      if (!serverWebhookUrl) {
-        console.error("Zmienna środowiskowa N8N_WEBHOOK_URL (dla kanału serwera) nie jest ustawiona!");
-        return; // Można też wysłać odpowiedź do użytkownika, jeśli to pożądane
-      }
-      const payload = {
-        username: message.author.username,
-        content: message.content,
-        channelId: message.channel.id,
-        messageId: message.id
-      };
-      console.log("Przygotowano payload (kanał serwera) do wysłania do N8N_WEBHOOK_URL:", payload);
-      try {
-        const response = await axios.post(serverWebhookUrl, payload);
-        console.log("Odpowiedź z N8N_WEBHOOK_URL:", response.status, response.data);
-        if (response.data?.reply) {
-          message.reply(response.data.reply).catch(console.error);
-          console.log("Wysłano odpowiedź z N8N_WEBHOOK_URL do użytkownika na kanale serwera:", response.data.reply);
-        }
-      } catch (error) {
-        console.error("Błąd podczas wysyłania danych do N8N_WEBHOOK_URL lub przetwarzania odpowiedzi:", error.response ? error.response.data : error.message);
-      }
-    } else {
-      // console.log("Wiadomość nie jest DM ani nie jest z dozwolonego kanału serwera, ignorowanie."); // Można zostawić lub usunąć
-    }
+    console.log("Wiadomość jest DM. Przetwarzanie przez OpenAI...");
+    await processMessageWithOpenAI(message);
+  } else if (message.channel.id === mainChannelId) {
+    console.log(`Wiadomość na głównym kanale (${mainChannelId}). Przetwarzanie przez OpenAI z reakcją...`);
+    await processMessageWithOpenAI(message, true);
+  } else if (mentionableChannelIds.includes(message.channel.id) && mentionedBot) {
+    console.log(`Bot oznaczony na dozwolonym kanale (${message.channel.id}). Przetwarzanie przez OpenAI...`);
+    await processMessageWithOpenAI(message);
   }
 });
 
