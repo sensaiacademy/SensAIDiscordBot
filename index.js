@@ -51,7 +51,7 @@ async function getOrCreateThreadId(userId) {
   }
 }
 
-// Funkcja do obsługi wiadomości przez OpenAI (dla DM i wzmianek)
+// Funkcja do obsługi wiadomości przez OpenAI (TYLKO dla wzmianek na określonych kanałach)
 async function processMessageWithOpenAI(message) {
   console.log(`Rozpoczynam obsługę wiadomości przez OpenAI: "${message.content}" od ${message.author.tag}, ID użytkownika: ${message.author.id}`);
   
@@ -110,7 +110,66 @@ async function processMessageWithOpenAI(message) {
   }
 }
 
-// Główny handler wiadomości
+// NOWA FUNKCJA do obsługi DM przez Webhook
+async function handleDMWithWebhook(message) {
+  console.log(`Rozpoczynam obsługę wiadomości prywatnej (DM) przez Webhook: "${message.content.substring(0,50)}..." od ${message.author.tag}`);
+
+  const privateWebhookUrl = process.env.PRIVATE_WEBHOOK;
+  const webhookKey = process.env.WEBHOOK_KEY;
+
+  if (!privateWebhookUrl) {
+    console.error("Zmienna środowiskowa PRIVATE_WEBHOOK nie jest ustawiona!");
+    message.reply("Przepraszam, wystąpił problem z moją konfiguracją (brak URL webhooka dla DM).").catch(console.error);
+    return;
+  }
+  if (!webhookKey) {
+    console.error("Zmienna środowiskowa WEBHOOK_KEY nie jest ustawiona!");
+    message.reply("Przepraszam, wystąpił problem z moją konfiguracją (brak klucza autoryzacyjnego dla webhooka DM).").catch(console.error);
+    return;
+  }
+
+  try {
+    await message.channel.sendTyping();
+  } catch (typingError) {
+    console.warn("Nie udało się wysłać 'sendTyping' dla DM:", typingError.message);
+  }
+
+  const payload = {
+    userId: message.author.id,
+    username: message.author.username,
+    messageId: message.id,
+    content: message.content,
+    timestamp: message.createdTimestamp
+  };
+
+  console.log("Wysyłanie danych DM do PRIVATE_WEBHOOK:", payload);
+
+  try {
+    const response = await axios.post(privateWebhookUrl, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Key': webhookKey // Dodanie niestandardowego nagłówka autoryzacyjnego
+      }
+    });
+    
+    console.log(`Odpowiedź z PRIVATE_WEBHOOK: Status ${response.status}, Dane:`, response.data);
+    const replyText = response.data?.reply || response.data?.output;
+
+    if (replyText && typeof replyText === 'string') {
+      message.reply(replyText).catch(console.error);
+      console.log("Wysłano odpowiedź z PRIVATE_WEBHOOK do użytkownika (DM):", replyText.substring(0,100) + "...");
+    } else if (response.data) {
+      console.log("Odpowiedź z PRIVATE_WEBHOOK (DM) nie zawierała tekstu w polu 'reply' ani 'output'.");
+    } else {
+       console.log("PRIVATE_WEBHOOK (DM) odpowiedział, ale bez danych (response.data jest puste).");
+    }
+  } catch (error) {
+    console.error("Błąd podczas komunikacji z PRIVATE_WEBHOOK (DM):", error.response ? error.response.data : error.message);
+    message.reply("Przepraszam, napotkałem błąd podczas próby przetworzenia Twojej wiadomości prywatnej.").catch(console.error);
+  }
+}
+
+// Zaktualizowany główny handler wiadomości
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
@@ -120,8 +179,8 @@ client.on('messageCreate', async (message) => {
   const mentionedBot = message.mentions.has(client.user.id);
 
   if (isDM) {
-    console.log("Wiadomość jest DM. Przetwarzanie przez OpenAI...");
-    await processMessageWithOpenAI(message);
+    console.log("Wiadomość jest DM. Przetwarzanie przez Webhook...");
+    await handleDMWithWebhook(message); // ZMIANA: Wywołanie nowej funkcji dla DM
   } else if (message.channel.id === mainChannelId) {
     console.log(`Wiadomość na głównym kanale (${mainChannelId}). Przetwarzanie przez N8N Webhook...`);
     
@@ -155,7 +214,7 @@ client.on('messageCreate', async (message) => {
     }
   } else if (mentionableChannelIds.includes(message.channel.id) && mentionedBot) {
     console.log(`Bot oznaczony na kanale (${message.channel.id}). Przetwarzanie przez OpenAI...`);
-    await processMessageWithOpenAI(message); // Można dodać reakcję, np. message.react('👍') jeśli chcesz
+    await processMessageWithOpenAI(message); // Ta funkcja jest teraz tylko dla wzmianek
   } else {
     console.log(`Wiadomość ("${message.content.substring(0,50)}...") nie pasuje do żadnej logiki przetwarzania.`);
   }
